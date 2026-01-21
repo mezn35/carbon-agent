@@ -25,7 +25,6 @@ def hitung_emisi_logistik(berat_kg: float, jarak_km: float, mode: str):
     - jarak_km: WAJIB DIISI. Jika user tidak menyebut angka, KAMU HARUS MENGHITUNG ESTIMASI jarak kasar antar lokasi tersebut dalam KM.
     - mode: Pilih salah satu: 'darat' (truk/mobil), 'udara' (pesawat), atau 'laut' (kapal).
     """
-    # Faktor Emisi (kgCO2e per kg-km)
     factors = {
         "darat": 0.0001,  # ~Truck Diesel
         "udara": 0.002,   # ~Air Freight
@@ -74,9 +73,16 @@ if prompt := st.chat_input("Contoh: Berapa emisi kirim 10kg kain dari Jakarta ke
     st.chat_message("user").write(prompt)
 
     with st.chat_message("assistant"):
+        # --- UPDATE DI SINI: INSTRUKSI ANTI-TYPO ---
         messages_for_ai = [
-    SystemMessage(content="Kamu adalah asisten hitung emisi Torajamelo. Jika user salah ketik nama kota (typo), KOREKSI nama kota tersebut ke nama yang benar di Indonesia dalam jawabanmu. Jangan ulangi typo user.")
-]
+            SystemMessage(content="""
+            Kamu adalah asisten hitung emisi Torajamelo. 
+            ATURAN PENTING:
+            1. Jika user typo nama kota (misal: 'Andung', 'Oraja', 'Sby'), KAMU WAJIB MENGOREKSINYA menjadi nama kota yang benar (Bandung, Toraja, Surabaya) di dalam kalimat jawabanmu.
+            2. Jangan ulangi kesalahan ketik user.
+            3. Jelaskan hasil perhitungan dengan bahasa yang profesional namun ramah.
+            """)
+        ]
         
         for i, m in enumerate(st.session_state.messages):
             if i == 0: continue 
@@ -101,16 +107,14 @@ if prompt := st.chat_input("Contoh: Berapa emisi kirim 10kg kain dari Jakarta ke
                     selected_tool = {t.name: t for t in tools}[tool_name]
                     tool_output = selected_tool.invoke(tool_args)
                     
-                    # --- BAGIAN YANG TADI ERROR SUDAH DIPERBAIKI DI BAWAH INI ---
                     tool_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(tool_output)))
-                    
                     status_container.write("✅ Selesai.")
                 
                 status_container.update(label="Perhitungan Selesai!", state="complete", expanded=False)
 
                 messages_for_ai.append(response) 
                 messages_for_ai.extend(tool_messages)
-                messages_for_ai.append(HumanMessage(content="Berdasarkan hasil alat di atas, jelaskan jawabannya kepada saya."))
+                messages_for_ai.append(HumanMessage(content="Berdasarkan hasil alat di atas, jelaskan jawabannya kepada saya. Ingat koreksi nama kota jika tadi ada typo."))
                 
                 final_response = llm.invoke(messages_for_ai)
                 response_content = final_response.content
