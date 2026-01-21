@@ -5,8 +5,8 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, System
 
 # --- 1. SETUP HALAMAN ---
 st.set_page_config(page_title="Torajamelo Carbon Auditor", page_icon="⚖️", layout="wide")
-st.title("⚖️ Torajamelo Carbon Auditor (Compliance Ready)")
-st.caption("Menggunakan Standar DEFRA 2023 & Grid Faktor ESDM Indonesia")
+st.title("⚖️ Torajamelo Carbon Auditor (Strict Mode)")
+st.caption("Menggunakan Standar DEFRA 2023 - Strict Compliance Check")
 
 # --- 2. CEK KUNCI ---
 if "GROQ_API_KEY" in st.secrets:
@@ -16,27 +16,22 @@ else:
     st.stop()
 
 # --- 3. DATABASE EMISI (THE SOURCE OF TRUTH) ---
-# Ini adalah "Kitab Suci" data agar akurat.
-# Sumber: UK DEFRA 2023 & ESDM Indonesia
+# Kita perbanyak variasi agar mengakomodir "Pesawat Boros"
 FAKTOR_EMISI = {
-    # LOGISTIK DARAT (kgCO2e per km per kg muatan tidak relevan, biasanya per km unit)
-    # Kita pakai pendekatan: kgCO2e per Ton-KM (Standard Logistics)
-    "truk_diesel_kecil": 0.00028, # Van/Small Truck
-    "truk_diesel_besar": 0.00008, # Heavy Duty Truck (Lebih efisien per barang)
-    "kereta_api_barang": 0.00003, # Sangat rendah
-    "mobil_box_bensin": 0.00032,
+    # DARAT
+    "truk_diesel_kecil": 0.00028, 
+    "truk_diesel_besar": 0.00008,
+    "mobil_box": 0.00032,
+    "kereta_api": 0.00003,
     
-    # LOGISTIK UDARA (Long haul vs Short haul beda)
-    "pesawat_domestik": 0.00254, # Jarak pendek < 400km (Boros saat take off)
-    "pesawat_internasional": 0.00190, # Jarak jauh > 3000km
+    # UDARA (Logika Boros vs Irit)
+    # Short Haul (< 400km) = Sangat Boros (Boros di Takeoff/Landing)
+    "pesawat_pendek_boros": 0.00254, 
+    # Long Haul (> 3700km) = Lebih Efisien (Cruising phase lama)
+    "pesawat_jauh_efisien": 0.00190, 
     
-    # LOGISTIK LAUT
+    # LAUT
     "kapal_cargo": 0.00001,
-    
-    # LISTRIK (Grid Emission Factor Indonesia)
-    "listrik_jawa_bali": 0.790, # kgCO2e per kWh
-    "listrik_sumatera": 0.850,
-    "listrik_kalimantan": 1.050, # Masih banyak PLTD
 }
 
 # --- 4. DEFINISI ALAT (TOOLS) ---
@@ -44,70 +39,42 @@ FAKTOR_EMISI = {
 @tool
 def hitung_emisi_logistik_presisi(berat_kg: float, jarak_km: float, jenis_kendaraan: str):
     """
-    Menghitung emisi logistik dengan presisi tinggi berdasarkan jenis kendaraan spesifik.
-    WAJIB MINTA USER MENJELASKAN JENIS KENDARAAN SECARA SPESIFIK.
+    Menghitung emisi logistik.
     
-    Parameters:
-    - berat_kg: Berat barang (kg)
-    - jarak_km: Jarak tempuh (km)
-    - jenis_kendaraan: Pilih salah satu KEY dari database berikut:
-      ['truk_diesel_kecil', 'truk_diesel_besar', 'mobil_box_bensin', 'kereta_api_barang', 
-       'pesawat_domestik', 'pesawat_internasional', 'kapal_cargo']
+    CRITICAL RULE:
+    Parameter 'jenis_kendaraan' HARUS SAMA PERSIS dengan salah satu key di database:
+    ['truk_diesel_kecil', 'truk_diesel_besar', 'mobil_box', 'kereta_api', 
+     'pesawat_pendek_boros', 'pesawat_jauh_efisien', 'kapal_cargo']
+     
+    JIKA USER TIDAK SPESIFIK (misal cuma bilang 'pesawat'), KEMBALIKAN ERROR.
     """
     
-    # Normalisasi input agar cocok dengan key dictionary
+    # Normalisasi input
     kunci = jenis_kendaraan.lower().replace(" ", "_")
     
-    # Cek ketersediaan data
+    # --- LOGIC BARU: STRICT VALIDATION ---
+    # Jika tidak ada di database, kita TOLAK perhitungannya.
     if kunci not in FAKTOR_EMISI:
-        # Jika AI salah pilih key, kembalikan daftar yang benar
-        return f"Error: Jenis kendaraan '{jenis_kendaraan}' tidak spesifik. Pilih dari: {list(FAKTOR_EMISI.keys())}"
+        # Kembalikan pesan error ke AI, supaya AI nanya balik ke User
+        return (f"GAGAL: Jenis kendaraan '{jenis_kendaraan}' tidak ditemukan di database standar. "
+                f"Tanyakan ke user mau pakai yg mana: {list(FAKTOR_EMISI.keys())}")
     
     faktor = FAKTOR_EMISI[kunci]
-    
-    # Rumus: Berat (Ton) x Jarak (km) x Faktor (kgCO2e/Ton.km) -> Tapi faktor kita konversi ke kg
-    # Faktor di atas adalah per KG per KM untuk penyederhanaan
     total_emisi = berat_kg * jarak_km * faktor
     
     return {
-        "status": "SUKSES",
-        "metode": "GHG Protocol (Activity Data x Emission Factor)",
-        "input": f"{berat_kg}kg x {jarak_km}km via {kunci}",
-        "faktor_emisi_ref": f"{faktor} kgCO2e/kg.km (Sumber: DEFRA/Standard)",
+        "status": "VALID",
+        "jenis": kunci,
+        "input": f"{berat_kg}kg x {jarak_km}km",
+        "faktor_emisi": f"{faktor} kgCO2e/kg.km",
         "total_emisi_kgCO2e": round(total_emisi, 4)
     }
 
-@tool
-def hitung_emisi_listrik_regional(kwh: float, wilayah: str):
-    """
-    Menghitung emisi listrik berdasarkan Grid Factor spesifik wilayah di Indonesia.
-    Pilihan wilayah: ['listrik_jawa_bali', 'listrik_sumatera', 'listrik_kalimantan']
-    """
-    kunci = wilayah.lower().replace(" ", "_")
-    
-    if kunci not in FAKTOR_EMISI:
-        # Default ke Jawa Bali jika tidak ketemu
-        kunci = "listrik_jawa_bali"
-        pesan_tambahan = "(Menggunakan default Grid Jawa-Bali)"
-    else:
-        pesan_tambahan = ""
-        
-    faktor = FAKTOR_EMISI[kunci]
-    total_emisi = kwh * faktor
-    
-    return {
-        "status": "SUKSES",
-        "input": f"{kwh} kWh di {kunci}",
-        "faktor_emisi": f"{faktor} kgCO2e/kWh (Sumber: ESDM)",
-        "total_emisi_kgCO2e": round(total_emisi, 4),
-        "catatan": pesan_tambahan
-    }
-
-tools = [hitung_emisi_logistik_presisi, hitung_emisi_listrik_regional]
+tools = [hitung_emisi_logistik_presisi]
 
 # --- 5. OTAK AI (AUDITOR PERSONA) ---
 llm = ChatGroq(
-    temperature=0, # 0 artinya sangat kaku/faktual (bagus untuk auditor)
+    temperature=0, 
     model="llama-3.3-70b-versatile", 
     api_key=api_key
 ).bind_tools(tools)
@@ -115,28 +82,25 @@ llm = ChatGroq(
 # --- 6. INTERFACE ---
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
-        {"role": "assistant", "content": "Halo. Saya Auditor Karbon Torajamelo. Untuk perhitungan akurat, tolong sebutkan jenis kendaraan spesifik (misal: 'Truk Diesel Kecil' atau 'Pesawat Domestik') dan lokasi listrik (misal: 'Jawa Bali')."}
+        {"role": "assistant", "content": "Halo. Saya Auditor Torajamelo. Sebutkan detail pengiriman (Berat, Jarak, Jenis Kendaraan Spesifik)."}
     ]
 
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-if prompt := st.chat_input("Contoh: Kirim 50kg kain dari Jakarta ke Bandung pakai Truk Diesel Kecil"):
+if prompt := st.chat_input("Contoh: Kirim kain ke Jakarta naik pesawat"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
     with st.chat_message("assistant"):
-        # System Prompt yang diubah menjadi AUDITOR TEGAS
         messages_for_ai = [
             SystemMessage(content="""
-            Kamu adalah Auditor Penghitung Jejak Karbon Profesional.
-            Tugasmu adalah memberikan laporan yang AKURAT untuk pelaporan resmi.
+            Kamu adalah Auditor Karbon yang SANGAT KAKU dan TELITI.
             
-            ATURAN:
-            1. JANGAN PERNAH MENEBAK. Jika user cuma bilang "naik truk", TANYA BALIK: "Truk jenis apa? Diesel kecil atau besar?".
-            2. Gunakan Tools untuk mendapatkan angka pasti.
-            3. Jangan gunakan kata "perkiraan" jika sudah menggunakan data Tools. Gunakan kata "Berdasarkan standar DEFRA/ESDM...".
-            4. Jika user typo nama kota, koreksi otomatis.
+            ATURAN UTAMA:
+            1. Jika user bilang "naik pesawat", JANGAN LANGSUNG HITUNG. Coba panggil tool dengan input "pesawat".
+            2. Jika tool mengembalikan ERROR/GAGAL, kamu WAJIB bertanya balik ke user untuk memilih opsi yang diberikan tool.
+            3. Jangan pernah berasumsi.
             """)
         ]
         
@@ -149,39 +113,38 @@ if prompt := st.chat_input("Contoh: Kirim 50kg kain dari Jakarta ke Bandung paka
             response = llm.invoke(messages_for_ai)
             
             if response.tool_calls:
-                status_container = st.status("🔍 Mengaudit Data Referensi...", expanded=True)
+                status_container = st.status("🔍 Verifikasi Database...", expanded=True)
                 tool_messages = []
+                force_stop = False
                 
                 for tool_call in response.tool_calls:
                     tool_name = tool_call["name"]
                     tool_args = tool_call["args"]
                     
-                    status_container.write(f"Query Database: `{tool_name}`")
-                    status_container.write(f"Parameter: {tool_args}")
+                    status_container.write(f"Cek Spesifikasi: `{tool_args.get('jenis_kendaraan')}`")
                     
                     selected_tool = {t.name: t for t in tools}[tool_name]
                     tool_output = selected_tool.invoke(tool_args)
                     
-                    # Jika output string (error message), tampilkan error
-                    if isinstance(tool_output, str) and "Error" in tool_output:
-                        status_container.error(tool_output)
+                    # Cek apakah tool menolak input?
+                    if isinstance(tool_output, str) and "GAGAL" in tool_output:
+                        status_container.error("❌ Spesifikasi tidak lengkap!")
+                        status_container.write("Meminta klarifikasi user...")
                     else:
-                        status_container.write("✅ Data ditemukan.")
+                        status_container.write("✅ Data Valid.")
                     
                     tool_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(tool_output)))
                 
-                status_container.update(label="Audit Selesai", state="complete", expanded=False)
+                status_container.update(label="Proses Selesai", state="complete", expanded=False)
 
                 messages_for_ai.append(response) 
                 messages_for_ai.extend(tool_messages)
-                messages_for_ai.append(HumanMessage(content="Buatlah laporan formal berdasarkan data angka di atas. Sebutkan sumber datanya (DEFRA/ESDM)."))
                 
                 final_response = llm.invoke(messages_for_ai)
                 st.write(final_response.content)
                 st.session_state.messages.append({"role": "assistant", "content": final_response.content})
             
             else:
-                # Jika AI tidak pakai tools (biasanya karena user kurang spesifik)
                 st.write(response.content)
                 st.session_state.messages.append({"role": "assistant", "content": response.content})
 
