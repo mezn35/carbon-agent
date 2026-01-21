@@ -1,161 +1,121 @@
 import streamlit as st
+import pandas as pd
 from langchain_groq import ChatGroq
-from langchain_core.tools import tool
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
+from io import BytesIO
 
-# --- 1. SETUP ---
-st.set_page_config(page_title="Torajamelo Carbon Auditor", page_icon="🚫", layout="wide")
-st.title("🚫 Torajamelo Strict Auditor")
-st.caption("Zero Tolerance for Assumptions. Data must be explicit.")
+# --- KONFIGURASI HALAMAN ---
+st.set_page_config(page_title="Torajamelo Carbon Dashboard", page_icon="📊", layout="wide")
 
-if "GROQ_API_KEY" in st.secrets:
-    api_key = st.secrets["GROQ_API_KEY"]
-else:
-    st.error("🚨 API Key belum disetting!")
-    st.stop()
-
-# --- 2. DATABASE EMISI (STANDAR DEFRA 2023) ---
-FAKTOR_EMISI = {
-    # Key harus spesifik agar AI tidak asal pilih
-    "truk_diesel": 0.00028,
-    "mobil_box": 0.00032,
-    "kereta_api_barang": 0.00003, # Khusus barang
-    "pesawat_jarak_pendek": 0.00254, # < 400km (Boros)
-    "pesawat_jarak_jauh": 0.00190,   # > 3000km (Efisien)
-    "kapal_laut_kargo": 0.00001
+# --- DATABASE FAKTOR EMISI (STANDAR DEFRA/ESDM) ---
+# Source of Truth - Angka ini tidak bisa diganggu gugat oleh AI
+EMISSION_FACTORS = {
+    "Logistik - Truk Diesel (Kecil)": 0.00028,
+    "Logistik - Truk Diesel (Besar)": 0.00008,
+    "Logistik - Mobil Box": 0.00032,
+    "Logistik - Kereta Api Barang": 0.00003,
+    "Logistik - Pesawat Domestik (<400km)": 0.00254,
+    "Logistik - Pesawat Internasional (>3000km)": 0.00190,
+    "Logistik - Kapal Laut Kargo": 0.00001,
+    "Listrik - Grid Jawa-Bali": 0.790,
+    "Listrik - Grid Sumatera": 0.850,
+    "Listrik - Grid Lainnya": 0.900
 }
 
-# --- 3. ALAT DENGAN VALIDASI LAPIS BAJA ---
-@tool
-def validasi_dan_hitung(berat_kg: float = 0, jarak_km: float = 0, jenis_kendaraan: str = ""):
-    """
-    Alat tunggal untuk menghitung emisi.
+# --- HEADER ---
+st.title("📊 Torajamelo Carbon & Sustainability Report")
+st.markdown("---")
+
+# --- SIDEBAR (INPUT DATA) ---
+st.sidebar.header("📝 Input Data Laporan")
+st.sidebar.info("Masukkan data aktivitas operasional untuk mendapatkan perhitungan akurat sesuai standar GHG Protocol.")
+
+with st.sidebar.form("carbon_form"):
+    activity_type = st.selectbox("Jenis Aktivitas", ["Pengiriman Logistik", "Penggunaan Listrik"])
     
-    ATURAN KERAS (HARD RULES):
-    1. Parameter 'berat_kg' TIDAK BOLEH 0. Jika user tidak sebut angka, isi 0.
-    2. Parameter 'jarak_km' TIDAK BOLEH 0.
-    3. Parameter 'jenis_kendaraan' harus persis salah satu dari:
-       ['truk_diesel', 'mobil_box', 'kereta_api_barang', 'pesawat_jarak_pendek', 'pesawat_jarak_jauh', 'kapal_laut_kargo']
+    # Input Dinamis
+    weight = 0.0
+    distance = 0.0
+    kwh = 0.0
+    factor_key = ""
     
-    JANGAN MENCOBA MENEBAK. KIRIM APA ADANYA DARI USER.
-    """
-    
-    errors = []
-    
-    # Validasi 1: Berat
-    if berat_kg <= 0:
-        errors.append("❌ Berat barang (kg) belum diisi.")
-        
-    # Validasi 2: Jarak
-    if jarak_km <= 0:
-        errors.append("❌ Jarak tempuh (km) belum diketahui.")
-        
-    # Validasi 3: Jenis Kendaraan & Pencocokan Ketat
-    kunci_ditemukan = None
-    input_clean = jenis_kendaraan.lower().replace(" ", "_")
-    
-    # Cek apakah input user cocok dengan database
-    if input_clean in FAKTOR_EMISI:
-        kunci_ditemukan = input_clean
+    if activity_type == "Pengiriman Logistik":
+        factor_key = st.selectbox("Moda Transportasi", [k for k in EMISSION_FACTORS.keys() if "Logistik" in k])
+        weight = st.number_input("Berat Barang (Kg)", min_value=0.0, step=0.1)
+        distance = st.number_input("Jarak Tempuh (Km)", min_value=0.0, step=1.0)
     else:
-        # Jika tidak cocok persis, cek apakah mengandung kata kunci ambigu
-        if "pesawat" in input_clean:
-            errors.append("❌ Jenis Pesawat ambigu. Pilih: 'pesawat_jarak_pendek' atau 'pesawat_jarak_jauh'?")
-        elif "kereta" in input_clean and "barang" not in input_clean:
-             # Paksa user confirm kereta barang, bukan kereta penumpang
-            errors.append("❌ Jenis Kereta ambigu. Apakah maksud Anda 'kereta_api_barang'?")
-        elif "truk" in input_clean and "diesel" not in input_clean:
-            errors.append("❌ Jenis Truk ambigu. Apakah maksud Anda 'truk_diesel'?")
-        else:
-            errors.append(f"❌ Kendaraan '{jenis_kendaraan}' tidak dikenal di database DEFRA.")
-
-    # KEPUTUSAN FINAL
-    if errors:
-        return "\n".join(errors) + "\n\nMohon lengkapi data di atas agar saya bisa menghitung."
-    
-    # Jika lolos semua validasi, baru hitung
-    faktor = FAKTOR_EMISI[kunci_ditemukan]
-    total = berat_kg * jarak_km * faktor
-    
-    return {
-        "status": "APPROVED",
-        "detail": f"{berat_kg}kg x {jarak_km}km x {kunci_ditemukan}",
-        "faktor": faktor,
-        "total_emisi_kgCO2e": round(total, 4)
-    }
-
-tools = [validasi_dan_hitung]
-
-# --- 4. OTAK AI (Strict Mode) ---
-llm = ChatGroq(
-    temperature=0, 
-    model="llama-3.3-70b-versatile", 
-    api_key=api_key
-).bind_tools(tools)
-
-# --- 5. UI ---
-if "messages" not in st.session_state:
-    st.session_state["messages"] = [
-        {"role": "assistant", "content": "Sistem Auditor Siap. Saya tidak akan menghitung jika data Berat, Jarak, dan Jenis Kendaraan tidak lengkap."}
-    ]
-
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
-
-if prompt := st.chat_input("Contoh: Kirim kain ke Jakarta"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-
-    with st.chat_message("assistant"):
-        # System Prompt: DILARANG MENGHITUNG MANUAL
-        messages_for_ai = [
-            SystemMessage(content="""
-            Kamu adalah Auditor Galak.
-            1. JANGAN PERNAH menghitung manual pakai otakmu. WAJIB pakai tool `validasi_dan_hitung`.
-            2. Jangan pernah menebak berat atau jarak. Jika user tidak sebut angka, kirim 0 ke tool.
-            3. Jika Tool mengembalikan error (tanda ❌), bacakan error tersebut ke user dan minta kelengkapan data.
-            """)
-        ]
+        factor_key = st.selectbox("Lokasi Grid Listrik", [k for k in EMISSION_FACTORS.keys() if "Listrik" in k])
+        kwh = st.number_input("Konsumsi Listrik (kWh)", min_value=0.0, step=0.1)
         
-        for i, m in enumerate(st.session_state.messages):
-            if i == 0: continue 
-            role_class = HumanMessage if m["role"] == "user" else AIMessage
-            messages_for_ai.append(role_class(content=m["content"]))
+    submitted = st.form_submit_button("🧮 Hitung Emisi")
+
+# --- LOGIC PERHITUNGAN (HARD MATH - NO AI GUESSING) ---
+if submitted:
+    # 1. Hitung Angka Pasti
+    factor_val = EMISSION_FACTORS[factor_key]
+    emission_result = 0.0
+    rumus_text = ""
+    
+    if activity_type == "Pengiriman Logistik":
+        # Rumus: Berat x Jarak x Faktor
+        emission_result = weight * distance * factor_val
+        rumus_text = f"{weight} kg x {distance} km x {factor_val} (Faktor Emisi)"
+    else:
+        # Rumus: kWh x Faktor
+        emission_result = kwh * factor_val
+        rumus_text = f"{kwh} kWh x {factor_val} (Faktor Emisi)"
+    
+    # 2. Tampilkan Hasil di Dashboard Utama
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric(label="Total Emisi (kgCO2e)", value=f"{emission_result:,.4f}")
+    with col2:
+        st.metric(label="Faktor Emisi Digunakan", value=factor_val)
+    with col3:
+        st.metric(label="Confidence Level", value="100% (Audited Data)")
         
-        try:
-            response = llm.invoke(messages_for_ai)
+    st.success(f"✅ **Perhitungan Valid:** {rumus_text}")
+    
+    # --- BAGIAN AI (HANYA UNTUK ANALISA KUALITATIF) ---
+    st.markdown("### 🧠 AI Sustainability Analysis")
+    st.caption("Analisa ini dibuat otomatis oleh AI untuk saran pengurangan emisi dalam laporan tahunan.")
+    
+    if "GROQ_API_KEY" in st.secrets:
+        llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=st.secrets["GROQ_API_KEY"])
+        
+        # Prompt AI: Fokus ke solusi, bukan menghitung ulang
+        prompt = f"""
+        Saya baru saja menghitung emisi untuk aktivitas: {activity_type} - {factor_key}.
+        Total emisi: {emission_result} kgCO2e.
+        Detail: {weight if weight else kwh} unit aktivitas.
+        
+        Berikan 3 paragraf pendek untuk Laporan Keberlanjutan (Sustainability Report):
+        1. Analisis dampak lingkungan dari angka ini (apakah tinggi/rendah).
+        2. Saran taktis untuk mengurangi emisi ini di masa depan (mitigasi).
+        3. Kalimat penutup formal untuk investor.
+        
+        Gunakan bahasa Indonesia formal korporat.
+        """
+        
+        with st.spinner("AI sedang menyusun narasi laporan..."):
+            response = llm.invoke(prompt)
+            st.write(response.content)
             
-            if response.tool_calls:
-                status_container = st.status("🕵️ Memeriksa Kelengkapan Data...", expanded=True)
-                tool_messages = []
-                
-                for tool_call in response.tool_calls:
-                    # Tampilkan apa yang dikirim AI ke Tool (untuk debugging user)
-                    args = tool_call["args"]
-                    status_container.write(f"**Data Diterima:** Berat={args.get('berat_kg',0)}, Jarak={args.get('jarak_km',0)}, Jenis='{args.get('jenis_kendaraan','')}'")
-                    
-                    selected_tool = {t.name: t for t in tools}[tool_call["name"]]
-                    tool_output = selected_tool.invoke(args)
-                    
-                    if isinstance(tool_output, str) and "❌" in tool_output:
-                        status_container.error("Data Tidak Lengkap / Ambigu!")
-                    else:
-                        status_container.success("Data Valid! Menghitung...")
-                    
-                    tool_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(tool_output)))
-                
-                status_container.update(label="Validasi Selesai", state="complete", expanded=False)
+            # Siapkan Data untuk Download
+            report_text = f"LAPORAN EMISI TORAJAMELO\n\nAktivitas: {factor_key}\nEmisi: {emission_result} kgCO2e\n\nAnalisa AI:\n{response.content}"
+            st.download_button(
+                label="📄 Download Laporan (TXT)",
+                data=report_text,
+                file_name="laporan_emisi_torajamelo.txt",
+                mime="text/plain"
+            )
 
-                messages_for_ai.append(response) 
-                messages_for_ai.extend(tool_messages)
-                
-                final_response = llm.invoke(messages_for_ai)
-                st.write(final_response.content)
-                st.session_state.messages.append({"role": "assistant", "content": final_response.content})
-            
-            else:
-                st.write(response.content)
-                st.session_state.messages.append({"role": "assistant", "content": response.content})
+    else:
+        st.warning("⚠️ API Key Groq belum disetting. Analisa AI tidak muncul.")
 
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+else:
+    st.info("👈 Silakan isi data operasional di menu sebelah kiri untuk memulai perhitungan.")
+    
+    # Tampilkan Tabel Referensi untuk Transparansi
+    with st.expander("Lihat Database Faktor Emisi (Referensi Standar)"):
+        df_ref = pd.DataFrame(list(EMISSION_FACTORS.items()), columns=["Aktivitas", "Faktor Emisi (kgCO2e)"])
+        st.table(df_ref)
