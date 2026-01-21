@@ -52,7 +52,6 @@ def hitung_emisi_listrik(kwh: float, lokasi: str = "indonesia"):
 tools = [hitung_emisi_logistik, hitung_emisi_listrik]
 
 # --- 4. Otak AI (LLM Setup) ---
-# Menggunakan model Llama 3.3 terbaru
 llm = ChatGroq(
     temperature=0, 
     model="llama-3.3-70b-versatile", 
@@ -75,12 +74,10 @@ if prompt := st.chat_input("Contoh: Berapa emisi kirim 10kg kain dari Jakarta ke
     st.chat_message("user").write(prompt)
 
     with st.chat_message("assistant"):
-        # System Prompt yang lebih tegas
         messages_for_ai = [
             SystemMessage(content="Kamu adalah asisten hitung emisi. Jika kamu menggunakan Tools, WAJIB jelaskan hasil perhitungannya kepada user dalam kalimat lengkap.")
         ]
         
-        # Masukkan history chat (skip pesan sapaan pertama biar tidak error)
         for i, m in enumerate(st.session_state.messages):
             if i == 0: continue 
             if m["role"] == "user":
@@ -89,7 +86,6 @@ if prompt := st.chat_input("Contoh: Berapa emisi kirim 10kg kain dari Jakarta ke
                 messages_for_ai.append(AIMessage(content=m["content"]))
         
         try:
-            # PHASE 1: Berpikir & Panggil Alat
             response = llm.invoke(messages_for_ai)
             
             if response.tool_calls:
@@ -105,4 +101,24 @@ if prompt := st.chat_input("Contoh: Berapa emisi kirim 10kg kain dari Jakarta ke
                     selected_tool = {t.name: t for t in tools}[tool_name]
                     tool_output = selected_tool.invoke(tool_args)
                     
-                    tool_messages.append(ToolMessage(tool_call
+                    # --- BAGIAN YANG TADI ERROR SUDAH DIPERBAIKI DI BAWAH INI ---
+                    tool_messages.append(ToolMessage(tool_call_id=tool_call["id"], content=str(tool_output)))
+                    
+                    status_container.write("✅ Selesai.")
+                
+                status_container.update(label="Perhitungan Selesai!", state="complete", expanded=False)
+
+                messages_for_ai.append(response) 
+                messages_for_ai.extend(tool_messages)
+                messages_for_ai.append(HumanMessage(content="Berdasarkan hasil alat di atas, jelaskan jawabannya kepada saya."))
+                
+                final_response = llm.invoke(messages_for_ai)
+                response_content = final_response.content
+            else:
+                response_content = response.content
+
+            st.write(response_content)
+            st.session_state.messages.append({"role": "assistant", "content": response_content})
+
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
