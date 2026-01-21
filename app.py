@@ -51,7 +51,7 @@ tools = [hitung_emisi_logistik, hitung_emisi_listrik]
 # --- 4. Otak AI (LLM Setup) ---
 llm = ChatGroq(
     temperature=0, 
-    model="llama3-8b-8192", 
+    model="llama-3.3-70b-versatile", # <-- GANTI JADI INI
     api_key=api_key
 ).bind_tools(tools)
 
