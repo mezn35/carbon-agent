@@ -1,121 +1,133 @@
 import streamlit as st
 import pandas as pd
 from langchain_groq import ChatGroq
-from io import BytesIO
 
-# --- KONFIGURASI HALAMAN ---
-st.set_page_config(page_title="Torajamelo Carbon Dashboard", page_icon="📊", layout="wide")
+# --- 1. KONFIGURASI HALAMAN (LAYOUT PROFESIONAL) ---
+st.set_page_config(page_title="Torajamelo GHG Calculator", page_icon="🏛️", layout="wide")
 
-# --- DATABASE FAKTOR EMISI (STANDAR DEFRA/ESDM) ---
-# Source of Truth - Angka ini tidak bisa diganggu gugat oleh AI
-EMISSION_FACTORS = {
-    "Logistik - Truk Diesel (Kecil)": 0.00028,
-    "Logistik - Truk Diesel (Besar)": 0.00008,
-    "Logistik - Mobil Box": 0.00032,
-    "Logistik - Kereta Api Barang": 0.00003,
-    "Logistik - Pesawat Domestik (<400km)": 0.00254,
-    "Logistik - Pesawat Internasional (>3000km)": 0.00190,
-    "Logistik - Kapal Laut Kargo": 0.00001,
-    "Listrik - Grid Jawa-Bali": 0.790,
-    "Listrik - Grid Sumatera": 0.850,
-    "Listrik - Grid Lainnya": 0.900
+st.title("🏛️ Torajamelo GHG Protocol Calculator")
+st.caption("Standardized for POJK 51/2017 & Global Reporting Initiative (GRI)")
+
+# --- 2. DATABASE FAKTOR EMISI (SANGAT DETIL) ---
+# Sumber: UK DEFRA 2023, IEA, & ESDM (Grid Indonesia)
+# Satuan Faktor disesuaikan dengan input user
+FAKTOR_EMISI = {
+    # --- SCOPE 2: LISTRIK & MESIN (kgCO2e per kWh) ---
+    "Grid Jawa-Bali (PLN)": 0.790,
+    "Grid Sumatera (PLN)": 0.850,
+    "Grid Kalimantan (PLN)": 1.050,
+    "Grid Sulawesi (PLN)": 0.800, # Estimasi wilayah Toraja
+    
+    # --- SCOPE 3: LOGISTIK (kgCO2e per kg.km) ---
+    # Logika: Berat barang mempengaruhi konsumsi BBM kendaraan
+    "Logistik - Truk Diesel": 0.00028, 
+    "Logistik - Mobil Box (Blind Van)": 0.00032,
+    "Logistik - Pesawat Kargo (Domestik)": 0.00254,
+    "Logistik - Kapal Laut": 0.00001,
+    
+    # --- LOGISTIK MIKRO (Spesifik Indonesia) ---
+    # Kurir Motor: Emisi per km dibagi asumsi kapasitas angkut rata-rata
+    "Kurir Motor (Gojek/Grab) - Dedicated": 0.00018, 
+    
+    # --- TRANSPORTASI UMUM (Penumpang membawa barang) ---
+    # Faktor emisi per penumpang.km (diasumsikan barang = 1 penumpang jika besar)
+    "Transport Umum - Bus (TransJakarta)": 0.00010, # Per kg.km (Sangat efisien)
+    "Transport Umum - KRL/MRT (Listrik)": 0.00004,  # Per kg.km
 }
 
-# --- HEADER ---
-st.title("📊 Torajamelo Carbon & Sustainability Report")
+# --- 3. UI TAB UNTUK SCOPE 1, 2, 3 ---
+tab1, tab2, tab3 = st.tabs(["🏭 Scope 2: Mesin & Listrik", "🚚 Scope 3: Logistik & Kurir", "🔥 Scope 1: Genset & BBM"])
+
+# === TAB 1: MESIN PRODUKSI (Packing, Jahit, AC) ===
+with tab1:
+    st.header("Perhitungan Emisi Listrik & Mesin")
+    st.info("Gunakan ini untuk menghitung emisi dari Mesin Packing, Mesin Jahit, Lampu, atau AC.")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        nama_mesin = st.text_input("Nama Alat/Mesin", placeholder="Contoh: Mesin Packing A")
+        watt_mesin = st.number_input("Daya Listrik (Watt)", min_value=0, value=100, help="Cek label di belakang mesin")
+        durasi_jam = st.number_input("Durasi Nyala (Jam)", min_value=0.0, value=1.0)
+    with col_b:
+        lokasi_grid = st.selectbox("Lokasi Listrik", ["Grid Jawa-Bali (PLN)", "Grid Sulawesi (PLN)", "Grid Sumatera (PLN)"])
+    
+    if st.button("Hitung Emisi Mesin"):
+        # Rumus: (Watt / 1000) * Jam * Faktor Grid
+        kwh_used = (watt_mesin / 1000) * durasi_jam
+        faktor = FAKTOR_EMISI[lokasi_grid]
+        emisi_mesin = kwh_used * faktor
+        
+        st.success(f"✅ Emisi {nama_mesin}: **{emisi_mesin:.4f} kgCO2e**")
+        st.markdown(f"*Detail: {kwh_used:.2f} kWh x {faktor} (Faktor Grid)*")
+
+# === TAB 2: LOGISTIK (Gojek, Truk, KRL) ===
+with tab2:
+    st.header("Perhitungan Emisi Pengiriman")
+    st.info("Mencakup pengiriman bahan baku (Inbound) dan produk jadi ke customer (Outbound).")
+    
+    col_c, col_d = st.columns(2)
+    with col_c:
+        moda = st.selectbox("Moda Transportasi", [
+            "Kurir Motor (Gojek/Grab) - Dedicated",
+            "Transport Umum - Bus (TransJakarta)",
+            "Transport Umum - KRL/MRT (Listrik)",
+            "Logistik - Mobil Box (Blind Van)",
+            "Logistik - Truk Diesel",
+            "Logistik - Pesawat Kargo (Domestik)",
+            "Logistik - Kapal Laut"
+        ])
+    with col_d:
+        berat_kg = st.number_input("Berat Barang (Kg)", min_value=0.1, value=1.0)
+        jarak_km = st.number_input("Jarak Tempuh (Km)", min_value=1.0, value=10.0)
+        
+    if st.button("Hitung Emisi Logistik"):
+        faktor_logistik = FAKTOR_EMISI[moda]
+        total_logistik = berat_kg * jarak_km * faktor_logistik
+        
+        st.success(f"✅ Emisi Pengiriman: **{total_logistik:.4f} kgCO2e**")
+        st.markdown(f"*Detail: {berat_kg} kg x {jarak_km} km x {faktor_logistik}*")
+        
+        # Analisis Cerdas untuk Pemerintah
+        if "Pesawat" in moda:
+            st.warning("⚠️ **High Emission Alert:** Pengiriman udara memiliki jejak karbon tertinggi. Sarankan opsi laut/darat untuk laporan keberlanjutan.")
+        elif "KRL" in moda or "Bus" in moda:
+            st.info("🌱 **Green Logistics:** Penggunaan transportasi umum sangat efisien dan bagus untuk nilai ESG perusahaan.")
+
+# === TAB 3: GENSET/BBM (SCOPE 1) ===
+with tab3:
+    st.header("Perhitungan Bahan Bakar Langsung")
+    st.info("Jika pabrik/kantor menggunakan Genset Solar atau kendaraan operasional milik sendiri.")
+    
+    jenis_bbm = st.selectbox("Jenis Bahan Bakar", ["Solar (Diesel)", "Bensin (Pertalite/Pertamax)", "LPG (Kg)"])
+    jumlah_liter = st.number_input("Jumlah Konsumsi (Liter/Kg)", min_value=0.0)
+    
+    # Faktor Emisi BBM (kgCO2e per Liter) - DEFRA
+    FAKTOR_BBM = {
+        "Solar (Diesel)": 2.68,
+        "Bensin (Pertalite/Pertamax)": 2.31,
+        "LPG (Kg)": 2.93
+    }
+    
+    if st.button("Hitung Scope 1"):
+        faktor_bbm = FAKTOR_BBM[jenis_bbm]
+        emisi_bbm = jumlah_liter * faktor_bbm
+        st.success(f"✅ Emisi Langsung: **{emisi_bbm:.4f} kgCO2e**")
+
+# --- FOOTER REPORT GENERATOR ---
 st.markdown("---")
+st.subheader("📑 Generate Laporan Narasi (AI)")
 
-# --- SIDEBAR (INPUT DATA) ---
-st.sidebar.header("📝 Input Data Laporan")
-st.sidebar.info("Masukkan data aktivitas operasional untuk mendapatkan perhitungan akurat sesuai standar GHG Protocol.")
-
-with st.sidebar.form("carbon_form"):
-    activity_type = st.selectbox("Jenis Aktivitas", ["Pengiriman Logistik", "Penggunaan Listrik"])
-    
-    # Input Dinamis
-    weight = 0.0
-    distance = 0.0
-    kwh = 0.0
-    factor_key = ""
-    
-    if activity_type == "Pengiriman Logistik":
-        factor_key = st.selectbox("Moda Transportasi", [k for k in EMISSION_FACTORS.keys() if "Logistik" in k])
-        weight = st.number_input("Berat Barang (Kg)", min_value=0.0, step=0.1)
-        distance = st.number_input("Jarak Tempuh (Km)", min_value=0.0, step=1.0)
-    else:
-        factor_key = st.selectbox("Lokasi Grid Listrik", [k for k in EMISSION_FACTORS.keys() if "Listrik" in k])
-        kwh = st.number_input("Konsumsi Listrik (kWh)", min_value=0.0, step=0.1)
-        
-    submitted = st.form_submit_button("🧮 Hitung Emisi")
-
-# --- LOGIC PERHITUNGAN (HARD MATH - NO AI GUESSING) ---
-if submitted:
-    # 1. Hitung Angka Pasti
-    factor_val = EMISSION_FACTORS[factor_key]
-    emission_result = 0.0
-    rumus_text = ""
-    
-    if activity_type == "Pengiriman Logistik":
-        # Rumus: Berat x Jarak x Faktor
-        emission_result = weight * distance * factor_val
-        rumus_text = f"{weight} kg x {distance} km x {factor_val} (Faktor Emisi)"
-    else:
-        # Rumus: kWh x Faktor
-        emission_result = kwh * factor_val
-        rumus_text = f"{kwh} kWh x {factor_val} (Faktor Emisi)"
-    
-    # 2. Tampilkan Hasil di Dashboard Utama
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="Total Emisi (kgCO2e)", value=f"{emission_result:,.4f}")
-    with col2:
-        st.metric(label="Faktor Emisi Digunakan", value=factor_val)
-    with col3:
-        st.metric(label="Confidence Level", value="100% (Audited Data)")
-        
-    st.success(f"✅ **Perhitungan Valid:** {rumus_text}")
-    
-    # --- BAGIAN AI (HANYA UNTUK ANALISA KUALITATIF) ---
-    st.markdown("### 🧠 AI Sustainability Analysis")
-    st.caption("Analisa ini dibuat otomatis oleh AI untuk saran pengurangan emisi dalam laporan tahunan.")
-    
-    if "GROQ_API_KEY" in st.secrets:
+if "GROQ_API_KEY" in st.secrets:
+    if st.button("Buat Analisa Narasi untuk Pemerintah"):
         llm = ChatGroq(model="llama-3.3-70b-versatile", api_key=st.secrets["GROQ_API_KEY"])
-        
-        # Prompt AI: Fokus ke solusi, bukan menghitung ulang
-        prompt = f"""
-        Saya baru saja menghitung emisi untuk aktivitas: {activity_type} - {factor_key}.
-        Total emisi: {emission_result} kgCO2e.
-        Detail: {weight if weight else kwh} unit aktivitas.
-        
-        Berikan 3 paragraf pendek untuk Laporan Keberlanjutan (Sustainability Report):
-        1. Analisis dampak lingkungan dari angka ini (apakah tinggi/rendah).
-        2. Saran taktis untuk mengurangi emisi ini di masa depan (mitigasi).
-        3. Kalimat penutup formal untuk investor.
-        
-        Gunakan bahasa Indonesia formal korporat.
+        prompt = """
+        Buatlah satu paragraf narasi formal untuk Laporan Keberlanjutan (Sustainability Report).
+        Konteks: Kami menghitung emisi Scope 1, 2, dan 3 secara terpisah menggunakan standar faktor emisi Grid Indonesia dan DEFRA.
+        Tujuan: Menunjukkan transparansi dan akurasi data kepada auditor pemerintah.
+        Gunakan bahasa Indonesia baku, profesional, dan meyakinkan.
         """
-        
-        with st.spinner("AI sedang menyusun narasi laporan..."):
-            response = llm.invoke(prompt)
-            st.write(response.content)
-            
-            # Siapkan Data untuk Download
-            report_text = f"LAPORAN EMISI TORAJAMELO\n\nAktivitas: {factor_key}\nEmisi: {emission_result} kgCO2e\n\nAnalisa AI:\n{response.content}"
-            st.download_button(
-                label="📄 Download Laporan (TXT)",
-                data=report_text,
-                file_name="laporan_emisi_torajamelo.txt",
-                mime="text/plain"
-            )
-
-    else:
-        st.warning("⚠️ API Key Groq belum disetting. Analisa AI tidak muncul.")
-
+        with st.spinner("AI menyusun kalimat auditor..."):
+            res = llm.invoke(prompt)
+            st.write(res.content)
 else:
-    st.info("👈 Silakan isi data operasional di menu sebelah kiri untuk memulai perhitungan.")
-    
-    # Tampilkan Tabel Referensi untuk Transparansi
-    with st.expander("Lihat Database Faktor Emisi (Referensi Standar)"):
-        df_ref = pd.DataFrame(list(EMISSION_FACTORS.items()), columns=["Aktivitas", "Faktor Emisi (kgCO2e)"])
-        st.table(df_ref)
+    st.warning("Pasang API Key untuk fitur narasi AI.")
