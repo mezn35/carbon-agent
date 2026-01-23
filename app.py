@@ -31,7 +31,7 @@ DB_EMISI = {
     "SCOPE 2 (Listrik & Energi Tidak Langsung)": {
         "Listrik Grid Jawa-Madura-Bali": {"faktor": 0.790, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Jamali 2022 (DJK ESDM)"},
         "Listrik Grid Sumatera": {"faktor": 0.850, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Sumatera 2022"},
-        "Listrik Grid Sulawesi (Toraja)": {"faktor": 0.800, "satuan": "kgCO2e/kWh", "sumber": "Estimasi Grid Sulmapa"},
+        "Listrik Grid Sulawesi": {"faktor": 0.800, "satuan": "kgCO2e/kWh", "sumber": "Estimasi Grid Sulmapa"},
     },
     "SCOPE 3 (Logistik & Rantai Pasok)": {
         # Logistik Darat
