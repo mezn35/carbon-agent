@@ -14,7 +14,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header">⚖️ Torajamelo ESG & Carbon Audit System</div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header">⚖️ ESG & Carbon Audit System</div>', unsafe_allow_html=True)
 st.markdown('<div class="sub-header">Compliance Standard: GHG Protocol Corporate Standard & ISO 14064-1</div>', unsafe_allow_html=True)
 st.markdown("---")
 
