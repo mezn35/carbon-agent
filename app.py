@@ -2,7 +2,7 @@ import streamlit as st
 import datetime
 
 # --- 1. KONFIGURASI SISTEM AUDIT ---
-st.set_page_config(page_title="Torajamelo ESG Auditor System", page_icon="⚖️", layout="wide")
+st.set_page_config(page_title="ESG Auditor System", page_icon="⚖️", layout="wide")
 
 # Styling agar terlihat seperti Software Pemerintah/Enterprise
 st.markdown("""
