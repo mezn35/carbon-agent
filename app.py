@@ -1,10 +1,10 @@
 import streamlit as st
 import datetime
 
-# --- 1. KONFIGURASI SISTEM AUDIT ---
-st.set_page_config(page_title="ESG Auditor System", page_icon="⚖️", layout="wide")
+# --- 1. KONFIGURASI SISTEM AUDIT (GENERIC / WHITE LABEL) ---
+st.set_page_config(page_title="ESG & Carbon Audit System", page_icon="🌍", layout="wide")
 
-# Styling agar terlihat seperti Software Pemerintah/Enterprise
+# Styling Professional
 st.markdown("""
 <style>
     .main-header {font-size: 30px; font-weight: bold; color: #2C3E50;}
@@ -14,52 +14,62 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header">⚖️ ESG & Carbon Audit System By Rezky</div>', unsafe_allow_html=True)
-st.markdown('<div class="sub-header">Compliance Standard: GHG Protocol Corporate Standard & ISO 14064-1</div>', unsafe_allow_html=True)
+# --- SIDEBAR: IDENTITAS PERUSAHAAN ---
+st.sidebar.header("🏢 Identitas Laporan")
+nama_pt = st.sidebar.text_input("Nama Perusahaan/Entitas", value="PT [Nama Perusahaan Anda]")
+lokasi_pt = st.sidebar.text_input("Lokasi Operasional", value="Jakarta, Indonesia")
+
+st.sidebar.markdown("---")
+st.sidebar.info("Sistem ini menggunakan standar GHG Protocol & ISO 14064-1 untuk pelaporan keberlanjutan (SR).")
+
+# --- HEADER DINAMIS ---
+st.markdown(f'<div class="main-header">⚖️ ESG & Carbon Audit System</div>', unsafe_allow_html=True)
+st.markdown(f'<div class="sub-header">Audit Entity: {nama_pt} | Standard: GHG Protocol</div>', unsafe_allow_html=True)
 st.markdown("---")
 
 # --- 2. DATABASE FAKTOR EMISI (THE SOURCE OF TRUTH) ---
-# Data ini diambil dari Laporan Inventarisasi GRK Nasional (Indonesia) & UK DEFRA 2023.
-# Struktur Data: {Nama: {Faktor: Angka, Satuan: Unit, Sumber: Referensi}}
-
+# Data Referensi: UK DEFRA 2023, IPCC, & ESDM Indonesia
 DB_EMISI = {
     "SCOPE 1 (Bahan Bakar Langsung)": {
         "Solar/Diesel Industri (B30)": {"faktor": 2.68, "satuan": "kgCO2e/Liter", "sumber": "ESDM & IPCC 2006 (Tier 2)"},
         "Bensin (Ron 90/92)": {"faktor": 2.31, "satuan": "kgCO2e/Liter", "sumber": "IPCC 2006"},
         "LPG (Gas Tabung)": {"faktor": 2.93, "satuan": "kgCO2e/Kg", "sumber": "IPCC 2006"},
+        "Gas Alam (CNG/LNG)": {"faktor": 2.75, "satuan": "kgCO2e/kg", "sumber": "IPCC 2006"}
     },
     "SCOPE 2 (Listrik & Energi Tidak Langsung)": {
-        "Listrik Grid Jawa-Madura-Bali": {"faktor": 0.790, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Jamali 2022 (DJK ESDM)"},
-        "Listrik Grid Sumatera": {"faktor": 0.850, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Sumatera 2022"},
+        "Listrik Grid Jawa-Madura-Bali": {"faktor": 0.790, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Jamali (DJK ESDM)"},
+        "Listrik Grid Sumatera": {"faktor": 0.850, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Sumatera"},
         "Listrik Grid Sulawesi": {"faktor": 0.800, "satuan": "kgCO2e/kWh", "sumber": "Estimasi Grid Sulmapa"},
+        "Listrik Grid Kalimantan": {"faktor": 1.050, "satuan": "kgCO2e/kWh", "sumber": "Faktor Emisi Grid Kalbar/Kalselteng"},
+        "Listrik Grid Nusa Tenggara": {"faktor": 0.950, "satuan": "kgCO2e/kWh", "sumber": "Estimasi Grid Nusra"}
     },
     "SCOPE 3 (Logistik & Rantai Pasok)": {
         # Logistik Darat
         "Truk Diesel Kecil (<3.5 Ton)": {"faktor": 0.00028, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - HGV Diesel"},
         "Truk Diesel Besar (>7.5 Ton)": {"faktor": 0.00008, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - HGV Diesel Rigid"},
         "Mobil Box / Blind Van": {"faktor": 0.00032, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - LCV"},
-        "Kurir Motor (Gojek/Grab)": {"faktor": 0.00018, "satuan": "kgCO2e/kg.km", "sumber": "Internal Calculation based on 110cc emission"},
+        "Kurir Motor (Gojek/Grab)": {"faktor": 0.00018, "satuan": "kgCO2e/kg.km", "sumber": "Calculation based on 110cc emission"},
         
-        # Logistik Udara (Pembedaan Jarak Sangat Penting)
-        "Pesawat Kargo Domestik (<1000km)": {"faktor": 0.00254, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - Air Freight Short Haul (Inc. RF)"},
-        "Pesawat Kargo Internasional": {"faktor": 0.00190, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - Air Freight Long Haul (Inc. RF)"},
+        # Logistik Udara
+        "Pesawat Kargo Domestik (<1000km)": {"faktor": 0.00254, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - Air Freight Short Haul"},
+        "Pesawat Kargo Internasional": {"faktor": 0.00190, "satuan": "kgCO2e/kg.km", "sumber": "UK DEFRA 2023 - Air Freight Long Haul"},
         
         # Logistik Laut
         "Kapal Kargo/Feri": {"faktor": 0.00001, "satuan": "kgCO2e/kg.km", "sumber": "IMO / UK DEFRA 2023"},
         
-        # Transportasi Umum (Per Penumpang)
-        "Transport Umum: Bus/TransJakarta": {"faktor": 0.10, "satuan": "kgCO2e/pax.km", "sumber": "WRI Indonesia"},
+        # Transportasi Umum
+        "Transport Umum: Bus/BRT": {"faktor": 0.10, "satuan": "kgCO2e/pax.km", "sumber": "WRI Indonesia"},
         "Transport Umum: Kereta/KRL": {"faktor": 0.04, "satuan": "kgCO2e/pax.km", "sumber": "KAI Sustainability Report"},
     }
 }
 
 # --- 3. INTERFACE INPUT DATA BERBASIS TAB ---
-tab1, tab2, tab3, tab4 = st.tabs(["🔥 Scope 1 (BBM)", "⚡ Scope 2 (Listrik)", "🚚 Scope 3 (Logistik)", "📄 Laporan Akhir"])
+tab1, tab2, tab3, tab4 = st.tabs(["🔥 Scope 1 (BBM)", "⚡ Scope 2 (Listrik)", "🚚 Scope 3 (Logistik)", "📄 Cetak Laporan"])
 
 # ================= SCOPE 1 =================
 with tab1:
     st.header("Scope 1: Direct Emissions")
-    st.info("Emisi dari pembakaran bahan bakar genset, kendaraan operasional kantor, atau mesin berbahan bakar fosil.")
+    st.info("Emisi dari pembakaran bahan bakar genset, kendaraan operasional kantor, atau mesin pabrik.")
     
     col1a, col1b = st.columns(2)
     with col1a:
@@ -85,21 +95,21 @@ with tab1:
 # ================= SCOPE 2 =================
 with tab2:
     st.header("Scope 2: Indirect Energy Emissions")
-    st.info("Emisi dari penggunaan listrik PLN untuk kantor, gudang, dan operasional mesin jahit/packing listrik.")
+    st.info("Emisi dari penggunaan listrik PLN untuk kantor, gudang, dan operasional mesin.")
     
     col2a, col2b = st.columns(2)
     with col2a:
         s2_jenis = st.selectbox("Lokasi Grid Listrik", list(DB_EMISI["SCOPE 2 (Listrik & Energi Tidak Langsung)"].keys()))
+        
         # Fitur Detil Mesin
         st.markdown("**Kalkulator Konsumsi Mesin (Opsional)**")
-        st.caption("Jika tidak tahu total kWh tagihan, hitung per mesin di sini:")
-        m_watt = st.number_input("Watt Mesin", 0)
+        m_watt = st.number_input("Watt Mesin/Alat", 0)
         m_jam = st.number_input("Durasi Nyala (Jam)", 0.0)
-        m_qty = st.number_input("Jumlah Mesin", 1)
+        m_qty = st.number_input("Jumlah Unit", 1)
         
         kwh_kalkulasi = (m_watt * m_jam * m_qty) / 1000
         if kwh_kalkulasi > 0:
-            st.write(f"Estimasi: {kwh_kalkulasi} kWh")
+            st.write(f"Estimasi Konsumsi Alat: {kwh_kalkulasi} kWh")
             
     with col2b:
         s2_input_manual = st.number_input("Total Konsumsi Listrik (kWh) dari Tagihan PLN", min_value=0.0, step=0.1)
@@ -125,13 +135,12 @@ with tab2:
 # ================= SCOPE 3 =================
 with tab3:
     st.header("Scope 3: Other Indirect Emissions (Logistics)")
-    st.info("Emisi dari pengiriman barang (Inbound/Outbound) menggunakan pihak ketiga (Vendor/Kurir/Pesawat).")
+    st.info("Emisi dari pengiriman barang (Inbound/Outbound) menggunakan pihak ketiga.")
     
     col3a, col3b = st.columns(2)
     with col3a:
         s3_jenis = st.selectbox("Moda Transportasi", list(DB_EMISI["SCOPE 3 (Logistik & Rantai Pasok)"].keys()))
     with col3b:
-        # Logika Unit: Jika Transport Umum (Pax), inputnya Orang. Jika Logistik, inputnya Kg.
         if "Transport Umum" in s3_jenis:
             s3_beban = st.number_input("Jumlah Penumpang / Kurir (Orang)", min_value=1, value=1)
             label_beban = "pax"
@@ -155,12 +164,10 @@ with tab3:
     </div>
     """, unsafe_allow_html=True)
     
-    # Smart Audit Notes (Improvisasi untuk Pemerintah)
     if "Pesawat" in s3_jenis:
         st.markdown("""
         <div class="warning-box">
-            <b>⚠️ Audit Note:</b> Penggunaan kargo udara menyumbang emisi tertinggi. 
-            Disarankan melampirkan alasan 'Urgency' dalam laporan keberlanjutan jika volume pengiriman udara tinggi.
+            <b>⚠️ Audit Note:</b> Pengiriman udara (Air Freight) memiliki faktor emisi tinggi. Pastikan data berat dan jarak akurat untuk pelaporan.
         </div>
         """, unsafe_allow_html=True)
 
@@ -169,45 +176,51 @@ with tab4:
     st.header("📄 Summary Report Generation")
     
     total_emisi = s1_hasil + s2_hasil + s3_hasil
+    tgl = datetime.date.today()
     
     st.metric("Total Jejak Karbon (Total Carbon Footprint)", f"{total_emisi:,.4f} kgCO2e")
     
-    # Generate Text untuk Copy Paste
-    tgl = datetime.date.today()
-    
+    # Template Laporan Generic
     report_text = f"""
     LAPORAN PERHITUNGAN EMISI GRK (GHG REPORT)
-    Entitas: Torajamelo
-    Tanggal Perhitungan: {tgl}
-    Metodologi: GHG Protocol Corporate Standard
+    -----------------------------------------------------
+    Entitas Pelapor : {nama_pt}
+    Lokasi          : {lokasi_pt}
+    Tanggal Laporan : {tgl}
+    Metodologi      : GHG Protocol Corporate Standard
     
     RINGKASAN EKSEKUTIF:
     Total Emisi Terhitung: {total_emisi:,.4f} kgCO2e
     
-    RINCIAN DATA:
+    RINCIAN DATA PER SCOPE:
     
     1. SCOPE 1 (Emisi Langsung)
-       - Aktivitas: {s1_jenis if s1_jumlah > 0 else "Tidak ada data"}
-       - Konsumsi: {s1_jumlah}
-       - Total: {s1_hasil:,.4f} kgCO2e
-       - Faktor Emisi: {s1_data['faktor']} ({s1_data['sumber']})
+       - Sumber   : {s1_jenis if s1_jumlah > 0 else "Tidak ada data"}
+       - Konsumsi : {s1_jumlah} unit
+       - Emisi    : {s1_hasil:,.4f} kgCO2e
+       - Referensi: {s1_data['sumber']}
        
     2. SCOPE 2 (Emisi Energi)
-       - Grid/Lokasi: {s2_jenis}
-       - Konsumsi Listrik: {s2_final_kwh:.2f} kWh
-       - Total: {s2_hasil:,.4f} kgCO2e
-       - Faktor Emisi: {s2_data['faktor']} ({s2_data['sumber']})
+       - Grid     : {s2_jenis}
+       - Konsumsi : {s2_final_kwh:.2f} kWh
+       - Emisi    : {s2_hasil:,.4f} kgCO2e
+       - Referensi: {s2_data['sumber']}
        
     3. SCOPE 3 (Emisi Logistik/Lainnya)
-       - Moda: {s3_jenis}
-       - Beban: {s3_beban} {label_beban}
-       - Jarak: {s3_jarak} km
-       - Total: {s3_hasil:,.4f} kgCO2e
-       - Faktor Emisi: {s3_data['faktor']} ({s3_data['sumber']})
+       - Moda     : {s3_jenis}
+       - Beban    : {s3_beban} {label_beban}
+       - Jarak    : {s3_jarak} km
+       - Emisi    : {s3_hasil:,.4f} kgCO2e
+       - Referensi: {s3_data['sumber']}
        
-    PERNYATAAN:
-    Data ini dihitung menggunakan faktor emisi yang diakui secara internasional (DEFRA) dan nasional (ESDM) untuk memastikan kepatuhan pelaporan.
+    PERNYATAAN KEPATUHAN:
+    Perhitungan ini dilakukan berdasarkan prinsip akurasi, transparansi, dan konsistensi. Faktor emisi yang digunakan mengacu pada standar nasional (ESDM Indonesia) dan internasional (UK DEFRA/IPCC) yang berlaku.
+    
+    Dibuat oleh Sistem Audit ESG.
     """
     
-    st.text_area("Salin teks ini untuk Laporan Pemerintah/Investor:", report_text, height=400)
-    st.download_button("Download Laporan (.txt)", report_text, file_name=f"GHG_Report_Torajamelo_{tgl}.txt")
+    st.text_area("Salin teks ini untuk Laporan Pemerintah/Investor:", report_text, height=450)
+    
+    # Nama file download dinamis
+    file_name_clean = nama_pt.replace(" ", "_").replace(".", "")
+    st.download_button("Download Laporan (.txt)", report_text, file_name=f"GHG_Report_{file_name_clean}_{tgl}.txt")
